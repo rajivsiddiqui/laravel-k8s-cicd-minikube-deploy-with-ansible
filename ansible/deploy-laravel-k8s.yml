@@ -1,0 +1,37 @@
+---
+- name: Deploy Laravel App to Kubernetes
+  hosts: localhost
+  gather_facts: no
+  vars:
+    deployment_name: laravel-app
+    container_name: laravel
+    #namespace: default
+    image_name: devopssteps/laravel-app:latest
+    k8s_namespace: default
+
+  tasks:
+
+    - name: Update Laravel deployment with new image
+      ansible.builtin.shell: |
+        kubectl set image deployment/{{ deployment_name }} \
+          {{ container_name }}={{ image_name }} \
+          -n {{ k8s_namespace }}
+      register: update_result
+
+    - name: Force rollout restart (if using :latest)
+      shell: |
+        kubectl rollout restart deployment/{{ deployment_name }} -n {{ k8s_namespace }}
+
+    - name: Wait for rollout to finish
+      ansible.builtin.shell: |
+        kubectl rollout status deployment/{{ deployment_name }} -n {{ k8s_namespace }} --timeout=120s
+      when: update_result.rc == 0
+
+    - name: Get name of Laravel pod
+      ansible.builtin.shell: |
+        kubectl get pods -l app={{ container_name }} -n {{ k8s_namespace }} -o jsonpath='{.items[0].metadata.name}'
+      register: pod_name
+
+    - name: Run Laravel migrations
+      ansible.builtin.shell: |
+        kubectl exec -it {{ pod_name.stdout }} -n {{ k8s_namespace }} -- php artisan migrate --force
